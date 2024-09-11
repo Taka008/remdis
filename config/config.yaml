@@ -45,12 +45,15 @@ TIME_OUT:
  block_time: 10 # sec
 
 TTS:
- engine_name: ttslearn # ttslearn or openjtalk
+ engine_name: ttslearn # ttslearn, openjtalk, or azure
  model_name: tacotron2_hifipwg_jsut24k # ttslearnのモデル名
  frame_length: 0.05 # Sec
  send_interval: 0.04 # Sec
  sample_rate: 16000 # Hz
  sample_width: 2 # Bytes
+ azure: # This option is only used when "engine_name" is "azure". Otherwise, no setting is required.
+  api_key: <enter your azure API key>
+  region: <enter your azure region>
 
 AOUT:
  frame_length: 0.05 # Sec

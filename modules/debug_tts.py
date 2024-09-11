@@ -1,6 +1,7 @@
 import sys, os
 import numpy
 import queue
+import tempfile
 
 import time
 
@@ -10,6 +11,7 @@ import librosa
 
 from ttslearn.pretrained import create_tts_engine
 import pyopenjtalk
+import azure.cognitiveservices.speech as speechsdk
 from base import RemdisModule, RemdisUpdateType
 
 import torch
@@ -35,7 +37,11 @@ class TTS(RemdisModule):
         if self.engine_name == 'ttslearn':
             self.engine = create_tts_engine(self.model_name,
                                             device=device)
-        
+        elif self.engine_name == 'azure':
+            self.speech_config = speechsdk.SpeechConfig(
+                subscription=self.config['TTS']['azure']['api_key'],
+                region=self.config['TTS']['azure']['region'],
+            )
         self.is_revoked = False
         self._is_running = True
 
@@ -84,8 +90,39 @@ class TTS(RemdisModule):
                     x, sr = self.engine.tts(output_text)
                 elif self.engine_name == 'openjtalk':
                     x, sr = pyopenjtalk.tts(output_text, half_tone=-3.0)
+                elif self.engine_name == 'azure':
+                    with tempfile.NamedTemporaryFile() as temp_file:
+                        audio_config = speechsdk.audio.AudioOutputConfig(
+                            use_default_speaker=False,
+                            filename=temp_file.name,
+                        )
+                        speech_synthesizer = speechsdk.SpeechSynthesizer(
+                            speech_config=self.speech_config,
+                            audio_config=audio_config,
+                        )
+                        voice_name: str = "ja-JP-NanamiNeural"
+                        voice_style: str = "chat"
+                        ssml_text: str = f"""
+                            <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="ja-JP">
+                                <voice name="{voice_name}">
+                                    <mstts:express-as style="{voice_style}" styledegree="2">
+                                        {output_text}
+                                    </mstts:express-as>
+                                </voice>
+                            </speak>
+                        """
+                        speech_synthesis_result = speech_synthesizer.speak_ssml_async(ssml=ssml_text).get()
+                        if speech_synthesis_result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+                            x, sr = librosa.load(temp_file.name, sr=self.rate)
+                            x = (x * 32767).astype(numpy.int16)
+                        elif speech_synthesis_result.reason == speechsdk.ResultReason.Canceled:
+                            cancellation_details = speech_synthesis_result.cancellation_details
+                            if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                                if cancellation_details.error_details:
+                                    print("Error details: {}".format(cancellation_details.error_details))
+                                    print("Did you set the speech resource key and region values?")
                 else:
-                    sys.stderr.write('Currently, ttslearn and openjtalk are acceptable as a tts engine.')
+                    sys.stderr.write('Currently, ttslearn, openjtalk, and azure are acceptable as a tts engine.')
 
                 # MMDAgent-EXの仕様に合わせて音声をダウンサンプリング
                 x = librosa.resample(x.astype(numpy.float32),
